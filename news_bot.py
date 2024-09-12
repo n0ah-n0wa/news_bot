@@ -1,32 +1,26 @@
+import time
 from telethon.sync import TelegramClient
 from telethon.tl.types import MessageMediaPhoto, MessageMediaDocument
 from telethon import events
 import openai
-from telegram import Bot
 import logging
-import os
-import time
 import asyncio
 
-# Configure logging
-logging.basicConfig(level=logging.INFO,
-                    format='%(asctime)s - %(levelname)s - %(message)s')
+# Configure logging to save to a file
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("news_bot_log.log"),
+        logging.StreamHandler()
+    ]
+)
 
 # Access parameters
 api_id = '20772977'
 api_hash = '0bacdd9a8621f8f907a58ff3870219a5'
-bot_token = '7354476983:AAG8judAhTygD-dMCZOvwcofHAZyNGdi5EY'
 openai_api_key = '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'
-
-# List of channel IDs to monitor & user chat IDs to send results to
-# Ensure channel IDs have the -100 prefix
-channel_ids = [-1001479815768, -1001222869173, -1002401857796]
-user_chat_ids = [490748903, 452536082]
-
-# Initializing clients
-client = TelegramClient('session_name', api_id, api_hash)
-bot = Bot(token=bot_token)
-openai.api_key = openai_api_key
+bot_username = '@newewews_bot'
 
 # API rate limits
 MAX_TOKENS_PER_MINUTE = 40000
@@ -39,7 +33,15 @@ request_count_minute = 0
 request_count_day = 0
 last_request_time = time.time()
 
+# Initializing Telethon client
+client = TelegramClient('session_name', api_id, api_hash)
+openai.api_key = openai_api_key
 
+# Channels list to monitor
+channel_ids = [-1001479815768, -1001222869173, -1002401857796]
+
+
+# managing API limits
 async def manage_rate_limit(tokens_used):
     global request_count_minute, request_count_day, last_request_time, token_usage
 
@@ -72,6 +74,27 @@ async def manage_rate_limit(tokens_used):
     last_request_time = time.time()
 
     return True
+
+
+# Handle new messages
+@client.on(events.NewMessage(chats=channel_ids))
+async def handler(event):
+    message = event.message
+
+    if message.text:
+        logging.info(f"Message received: {message.text}...")
+
+        # Check content type (Advertising, Opinion, News)
+        content_type = await check_content_type(message.text)
+        if content_type in ['Реклама', 'Мнение']:
+            logging.info(f"Skipping a message of a type: {content_type}")
+            return
+
+        # Rewriting text
+        rewritten_text = await rewrite_text(message.text)
+
+        # Forwarding message with media to telegram_bot
+        await forward_message_to_bot(message, rewritten_text)
 
 
 # Checking content type: Ad, Opinion, or News
@@ -111,7 +134,8 @@ async def rewrite_text(text):
     try:
         prompt = f"""
         Сделай глубокий рерайт следующего текста, но оставь общий смысл неизменным,
-        а также сохрани прямые цитаты без изменений, если таковые в тексте есть: \"{text}\"
+        а также сохрани прямые цитаты без изменений, если таковые в тексте есть.
+        Обрати внимание, что результат ты должен вернуть на русском языке: \"{text}\"
         """
         # Approximate tokens count per request
         tokens_estimate = len(prompt.split()) * 1.5
@@ -137,83 +161,20 @@ async def rewrite_text(text):
         return text  # Return the original text if rewriting fails
 
 
-# Function to delete the downloaded media file when it's no longer needed
-def delete_file(file_path):
+async def forward_message_to_bot(message, rewritten_text):
     try:
-        os.remove(file_path)
-        logging.info(f"Deleted file: {file_path}")
+        # Find the bot by username and forward the message
+        bot_entity = await client.get_entity(bot_username)
+        await client.send_message(bot_entity, rewritten_text, file=message.media)
+        logging.info("Message successfully forwarded to bot.")
     except Exception as e:
-        logging.error(f"Error deleting file {file_path}: {e}")
+        logging.error(f"Error when forwarding a message: {e}")
 
 
-# Event handler for new messages from the specified channels
-@client.on(events.NewMessage(chats=channel_ids))
-async def handler(event):
-    message = event.message
+# Launching Telethon client
+async def main():
+    logging.info("Script running...")
+    await client.start()
+    await client.run_until_disconnected()
 
-    # Check if the message contains text
-    if message.text:
-        # Log the first 50 characters of the message
-        logging.info(f"Received message: {message.text[:50]}...")
-
-        # Check the type of content (Ad, Opinion, News)
-        content_type = await check_content_type(message.text)
-        if content_type in ['Реклама', 'Мнение']:
-            logging.info(f"Skipping message of type: {content_type}")
-            return
-
-        # Check if there is any media in the message
-        media = None
-        try:
-            if message.media:
-                if isinstance(message.media, MessageMediaPhoto):
-                    file = await client.download_media(message.media)
-                    media = {'type': 'photo', 'file_path': file}
-                    logging.info("Photo media downloaded.")
-                elif isinstance(message.media, MessageMediaDocument) and message.media.document.mime_type.startswith('video'):
-                    file = await client.download_media(message.media)
-                    media = {'type': 'video', 'file_path': file}
-                    logging.info("Video media downloaded.")
-        except Exception as e:
-            logging.error(f"Error downloading media: {e}")
-
-        # Rewrite the post's text
-        rewritten_text = await rewrite_text(message.text)
-
-        # Send the media and rewritten text to the specified user chat IDs
-        for chat_id in user_chat_ids:
-            try:
-                if media:
-                    if media['type'] == 'photo':
-                        await bot.send_photo(
-                            chat_id=chat_id,
-                            photo=open(media['file_path'], 'rb'),
-                            caption=rewritten_text,
-                        )
-                        logging.info(f"Photo sent to chat {chat_id}.")
-                    elif media['type'] == 'video':
-                        await bot.send_video(
-                            chat_id=chat_id,
-                            video=open(media['file_path'], 'rb'),
-                            caption=rewritten_text,
-                        )
-                        logging.info(f"Video sent to chat {chat_id}.")
-                else:
-                    await bot.send_message(
-                        chat_id=chat_id,
-                        text=rewritten_text,
-                    )
-                    logging.info(f"Message sent to chat {chat_id}.")
-            except Exception as e:
-                logging.error(f"Error sending message to chat {chat_id}: {e}")
-
-        # Delete media file after sending to all users
-        if media and media['file_path']:
-            delete_file(media['file_path'])
-
-
-# Start the client and keep the script running indefinitely
-with client:
-    logging.info("Starting the script...")
-    logging.info("Waiting for messages in specified channels...")
-    client.run_until_disconnected()
+asyncio.run(main())
