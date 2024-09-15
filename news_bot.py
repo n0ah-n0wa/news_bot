@@ -86,7 +86,8 @@ async def handler(event):
 
         # Check content type (Advertising, Opinion, News)
         content_type = await check_content_type(message.text)
-        if content_type in ['Реклама', 'Мнение']:
+        # Add 'Мнение' here to skip posts with personal opinion
+        if content_type in ['Реклама']:
             logging.info(f"Skipping a message of a type: {content_type}")
             return
 
