@@ -84,16 +84,20 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data == 'confirm':
         await query.edit_message_text(text="Message confirmed.")
     elif query.data.startswith('delete'):
+        message_id=query.message.message_id
+        await query.delete_message()
         # Deleting the message for current user only
-        message_id = int(query.data.split('_')[1])
         if user_id in message_tracker and message_id in message_tracker[user_id]:
-            await query.delete_message()
             message_tracker[user_id].remove(message_id)
 
 
 # Register handlers
 application.add_handler(MessageHandler(filters.ALL, handle_message))
 application.add_handler(CallbackQueryHandler(button_handler))
+
+
+# loggers = [logging.getLogger(name) for name in logging.root.manager.loggerDict]
+logging.getLogger("httpx").setLevel(logging.WARNING) # оффаем ненужные логи
 
 # Launching the bot
 if __name__ == '__main__':

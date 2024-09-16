@@ -61,8 +61,7 @@ async def manage_rate_limit(tokens_used):
     # Check if minute limit is reached
     if request_count_minute >= MAX_REQUESTS_PER_MINUTE or (token_usage + tokens_used) > MAX_TOKENS_PER_MINUTE:
         wait_time = 60 - time_since_last_request
-        logging.info(f"Rate limit reached, waiting for {
-                     wait_time:.2f} seconds...")
+        logging.info(f"Rate limit reached, waiting for {wait_time:.2f} seconds...")
         await asyncio.sleep(wait_time)
         request_count_minute = 0
         token_usage = 0
@@ -77,7 +76,7 @@ async def manage_rate_limit(tokens_used):
 
 
 # Handle new messages
-@client.on(events.NewMessage(chats=channel_ids))
+@client.on(events.NewMessage())
 async def handler(event):
     message = event.message
 
@@ -92,7 +91,8 @@ async def handler(event):
             return
 
         # Rewriting text
-        rewritten_text = await rewrite_text(message.text)
+        # rewritten_text = await rewrite_text(message.text)
+        rewritten_text = message.text # TEST
 
         # Forwarding message with media to telegram_bot
         await forward_message_to_bot(message, rewritten_text)
@@ -173,9 +173,13 @@ async def forward_message_to_bot(message, rewritten_text):
 
 
 # Launching Telethon client
-async def main():
-    logging.info("Script running...")
-    await client.start()
-    await client.run_until_disconnected()
+# async def main():
+#     logging.info("Script running...")
+#     await client.send_message('me', 'Hello, myself!')
+#     await client.start("+1 419 239 3418")
+#     await client.run_until_disconnected()
 
-asyncio.run(main())
+# asyncio.run(main())
+
+with client:
+    client.run_until_disconnected()
