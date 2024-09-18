@@ -76,7 +76,7 @@ async def manage_rate_limit(tokens_used):
 
 
 # Handle new messages
-@client.on(events.NewMessage())
+@client.on(events.NewMessage(chats=channel_ids))
 async def handler(event):
     message = event.message
 
