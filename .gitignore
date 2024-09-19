@@ -6,3 +6,4 @@ telegram_bot_log.log
 news_bot_log.log
 .venv/
 *.log
+db.py

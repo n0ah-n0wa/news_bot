@@ -1,6 +1,8 @@
+import db
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 import logging
+from io import BytesIO
 
 # Configure logging to save to a file
 logging.basicConfig(
@@ -82,7 +84,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     if query.data == 'confirm':
-        await query.edit_message_text(text="Message confirmed.")
+        return
+        raw=query.message.photo[-1].file_id
+        file_info = await context.bot.get_file(raw)
+        f =  BytesIO(await file_info.download_as_bytearray())
+        db.addpost(" ",query.message.text or query.message.caption,f.read())
+        await query.edit_message_reply_markup()
     elif query.data.startswith('delete'):
         message_id=query.message.message_id
         await query.delete_message()
