@@ -18,8 +18,6 @@ logging.basicConfig(
 TOKEN = '7354476983:AAG8judAhTygD-dMCZOvwcofHAZyNGdi5EY'
 user_chat_ids = [490748903, 452536082]
 news_bot_id = 7491816403    # news_bot account ID
-message_tracker = {}        # Dictionary for tracking user messages
-original_messages = {}      # Tracking monitoring messages IDs for editing
 
 # Application initialization
 application = Application.builder().token(TOKEN).build()
@@ -84,13 +82,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
                 # Track the message for each user
                 if sent_message:
-                    message_tracker.setdefault(chat_id, []).append(
-                        sent_message.message_id)
-
-                    # Track the original message for editing (store the sent message's ID)
-                    original_messages[chat_id] = sent_message.message_id
-                    logging.info(f"Message sent to chat_id: {
-                                 chat_id}, message_id: {sent_message.message_id}")
+                    logging.info(f"Message sent to chat_id: {chat_id}, message_id: {sent_message.message_id}")
                 else:
                     logging.warning(
                         f"Failed to send message to chat_id: {chat_id}")
@@ -104,67 +96,47 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_to_message = update.message.reply_to_message
 
-    # Making sure that the message is a reply to original message from bot
-    if reply_to_message and reply_to_message.from_user.id == context.bot.id:
-        user_id = update.effective_user.id
-        chat_id = reply_to_message.chat.id
+    user_id = update.effective_user.id
 
-        # Checking if there's still a message to edit
-        if chat_id in original_messages:
-            original_message_id = original_messages[chat_id]
-
-            # Checking reply type from user (photo, video, etc.)
-            if update.message.photo:
-                input_media = InputMediaPhoto(
-                    media=update.message.photo[-1].file_id,
-                    caption=reply_to_message.caption or update.message.caption or "<Нет текста>"
-                )
-                await context.bot.edit_message_media(
-                    chat_id=chat_id,
-                    message_id=original_message_id,
-                    media=input_media,
-                    reply_markup=reply_markup
-                )
-            elif update.message.video:
-                input_media = InputMediaVideo(
-                    media=update.message.video.file_id,
-                    caption=reply_to_message.caption or update.message.caption or "<Нет текста>"
-                )
-                await context.bot.edit_message_media(
-                    chat_id=chat_id,
-                    message_id=original_message_id,
-                    media=input_media,
-                    reply_markup=reply_markup
-                )
-            elif update.message.text:
-                # If the original message had a caption (photo or video), we edit the caption
-                if reply_to_message.photo or reply_to_message.video:
-                    await context.bot.edit_message_caption(
-                        chat_id=chat_id,
-                        message_id=original_message_id,
-                        caption=update.message.text,
-                        reply_markup=reply_markup
-                    )
-                else:
-                    # If it's a plain text message
-                    await context.bot.edit_message_text(
-                        chat_id=chat_id,
-                        message_id=original_message_id,
-                        text=update.message.text,
-                        reply_markup=reply_markup
-                    )
-            else:
-                logging.warning(
-                    "No valid content in the user's reply to edit the message.")
-
-            # Deleting reply from user
-            await update.message.delete()
-            logging.info(f"Reply from user {
-                         user_id} processed and message updated.")
+    # Checking reply type from user (photo, video, etc.)
+    if update.message.photo:
+        input_media = InputMediaPhoto(
+            media=update.message.photo[-1].file_id,
+            caption=reply_to_message.caption or update.message.caption or "<Нет текста>"
+        )
+        await reply_to_message.edit_media(
+            media=input_media,
+            reply_markup=reply_markup
+        )
+    elif update.message.video:
+        input_media = InputMediaVideo(
+            media=update.message.video.file_id,
+            caption=reply_to_message.caption or update.message.caption or "<Нет текста>"
+        )
+        await reply_to_message.edit_media(
+            media=input_media,
+            reply_markup=reply_markup
+        )
+    elif update.message.text:
+        # If the original message had a caption (photo or video), we edit the caption
+        if reply_to_message.photo or reply_to_message.video:
+            await reply_to_message.edit_caption(
+                caption=update.message.text,
+                reply_markup=reply_markup
+            )
         else:
-            logging.warning(f"No original message found for user {user_id}.")
+            # If it's a plain text message
+            await reply_to_message.edit_text(
+                text=update.message.text,
+                reply_markup=reply_markup
+            )
     else:
-        logging.warning(f"Message is not a reply to bot's message. Ignoring.")
+        logging.warning(
+            "No valid content in the user's reply to edit the message.")
+
+    # Deleting reply from user
+    await update.message.delete()
+    logging.info(f"Reply from user {user_id} processed and message updated.")
 
 
 # Handling button pressing
@@ -183,9 +155,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data.startswith('delete'):
         message_id = query.message.message_id
         await query.delete_message()
-        # Deleting the message for current user only
-        if user_id in message_tracker and message_id in message_tracker[user_id]:
-            message_tracker[user_id].remove(message_id)
 
 
 # Register handlers with more specific filters
