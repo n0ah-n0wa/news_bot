@@ -33,108 +33,92 @@ reply_markup = InlineKeyboardMarkup(keyboard)
 
 # Handling messages from news_bot
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
+    logging.info(
+        f"Received message from news_bot with content: {update.message.text or '<Нет текста>'}")
 
-    # Logging message details for debugging
-    logging.info(f"Received message from user_id: {user_id}")
-    logging.info(f"Message content: {update.message.text or '<Нет текста>'}")
-
-    # Check if the message is from the news_bot
-    if user_id == news_bot_id:
-        logging.info("Message identified as sent from news_bot.")
-
-        # Check that the message is not a reply
-        if not update.message.reply_to_message:
-            # Send the message to the user with buttons
-            for chat_id in user_chat_ids:
-                sent_message = None
-                # Handle photo messages
-                if update.message.photo:
-                    sent_message = await context.bot.send_photo(
-                        chat_id=chat_id,
-                        photo=update.message.photo[-1].file_id,
-                        caption=update.message.caption or "<Нет текста>",
-                        reply_markup=reply_markup
-                    )
-                # Handle video messages
-                elif update.message.video:
-                    sent_message = await context.bot.send_video(
-                        chat_id=chat_id,
-                        video=update.message.video.file_id,
-                        caption=update.message.caption or "<Нет текста>",
-                        reply_markup=reply_markup
-                    )
-                # Handle document messages
-                elif update.message.document:
-                    sent_message = await context.bot.send_document(
-                        chat_id=chat_id,
-                        document=update.message.document.file_id,
-                        caption=update.message.caption or "<Нет текста>",
-                        reply_markup=reply_markup
-                    )
-                # Handle text messages or other types
-                else:
-                    sent_message = await context.bot.send_message(
-                        chat_id=chat_id,
-                        text=update.message.text or "<Нет текста>",
-                        reply_markup=reply_markup
-                    )
-
-                # Track the message for each user
-                if sent_message:
-                    logging.info(f"Message sent to chat_id: {chat_id}, message_id: {sent_message.message_id}")
-                else:
-                    logging.warning(
-                        f"Failed to send message to chat_id: {chat_id}")
+    text = update.message.text or update.message.caption or "<Нет текста>"
+    for chat_id in user_chat_ids:
+        sent_message = None
+        # Handle photo messages
+        if update.message.photo:
+            sent_message = await context.bot.send_photo(
+                chat_id=chat_id,
+                photo=update.message.photo[-1].file_id,
+                caption=text,
+                reply_markup=reply_markup
+            )
+        # Handle video messages
+        elif update.message.video:
+            sent_message = await context.bot.send_video(
+                chat_id=chat_id,
+                video=update.message.video.file_id,
+                caption=text,
+                reply_markup=reply_markup
+            )
+        # Handle document messages
+        elif update.message.document:
+            sent_message = await context.bot.send_document(
+                chat_id=chat_id,
+                document=update.message.document.file_id,
+                caption=text,
+                reply_markup=reply_markup
+            )
+        # Handle text messages or other types
         else:
-            logging.info("Message is a reply, ignoring in handle_message.")
-    else:
-        logging.info("Message was not from news_bot.")
+            sent_message = await context.bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                reply_markup=reply_markup
+            )
+
+        # Track the message for each user
+        if sent_message:
+            logging.info(
+                f"Message sent to chat_id: {chat_id}, message_id: {sent_message.message_id}")
+        else:
+            logging.warning(
+                f"Failed to send message to chat_id: {chat_id}")
 
 
 # Handling user replies (editing)
 async def handle_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_to_message = update.message.reply_to_message
-
     user_id = update.effective_user.id
 
-    # Checking reply type from user (photo, video, etc.)
+    input_media = None
+    # Determining media type (photo, video, etc.) for editing
     if update.message.photo:
         input_media = InputMediaPhoto(
             media=update.message.photo[-1].file_id,
-            caption=reply_to_message.caption or update.message.caption or "<Нет текста>"
-        )
-        await reply_to_message.edit_media(
-            media=input_media,
-            reply_markup=reply_markup
+            caption=update.message.caption or reply_to_message.caption or "<Нет текста>"
         )
     elif update.message.video:
         input_media = InputMediaVideo(
             media=update.message.video.file_id,
-            caption=reply_to_message.caption or update.message.caption or "<Нет текста>"
+            caption=update.message.caption or reply_to_message.caption or "<Нет текста>"
         )
+
+    # Editing media or/and text
+    if input_media:
         await reply_to_message.edit_media(
             media=input_media,
             reply_markup=reply_markup
         )
     elif update.message.text:
-        # If the original message had a caption (photo or video), we edit the caption
+        # If original message has media - editing caption
         if reply_to_message.photo or reply_to_message.video:
             await reply_to_message.edit_caption(
                 caption=update.message.text,
                 reply_markup=reply_markup
             )
+        # If it was plain text - editing text
         else:
-            # If it's a plain text message
             await reply_to_message.edit_text(
                 text=update.message.text,
                 reply_markup=reply_markup
             )
-    else:
-        logging.warning(
-            "No valid content in the user's reply to edit the message.")
 
-    # Deleting reply from user
+    # Deleting user's reply message
     await update.message.delete()
     logging.info(f"Reply from user {user_id} processed and message updated.")
 
@@ -160,8 +144,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Register handlers with more specific filters
 application.add_handler(MessageHandler(
     filters.REPLY & filters.User(user_chat_ids), handle_reply))
-application.add_handler(MessageHandler(filters.User(
-    news_bot_id) & ~filters.REPLY, handle_message))
+application.add_handler(MessageHandler(
+    filters.User(news_bot_id) & ~filters.REPLY, handle_message))
 application.add_handler(CallbackQueryHandler(button_handler))
 
 # loggers = [logging.getLogger(name) for name in logging.root.manager.loggerDict]
