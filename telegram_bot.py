@@ -40,18 +40,30 @@ request_count_minute = 0
 request_count_day = 0
 last_request_time = time.time()
 
-# Keyboard for news posts
+# Keyboards for news posts
 keyboard = [[
     InlineKeyboardButton("Подтвердить", callback_data='confirm'),
     InlineKeyboardButton("Удалить", callback_data='delete'),
-    InlineKeyboardButton("Расширить", callback_data='expand')
+],
+    [
+    InlineKeyboardButton("Расширить", callback_data='expand'),
+    InlineKeyboardButton("Перевести (ENG)", callback_data='translate_eng'),
 ]]
 reply_markup = InlineKeyboardMarkup(keyboard)
+keyboard_eng = [[
+    InlineKeyboardButton("Confirm", callback_data='confirm_eng'),
+    InlineKeyboardButton("Delete", callback_data='delete'),
+]]
+reply_markup_eng = InlineKeyboardMarkup(keyboard_eng)
 
-# Keyboard for article response
+# Keyboards for article response
 article_keyboard = [[
-    InlineKeyboardButton("Подтвердить", callback_data='confirm_article'),
-    InlineKeyboardButton("Удалить", callback_data='delete_article')
+    InlineKeyboardButton("Подтвердить", callback_data='confirm'),
+    InlineKeyboardButton("Удалить", callback_data='delete'),
+],
+    [
+    InlineKeyboardButton(
+        "Перевести (ENG)", callback_data='translate_eng'),
 ]]
 article_reply_markup = InlineKeyboardMarkup(article_keyboard)
 
@@ -277,13 +289,48 @@ async def on_demand_article(text):
         return text  # Returns original text in case of an error
 
 
+# Translating posts & articles
+async def ai_translator_eng(text):
+    try:
+        prompt = f"""
+        Осуществи профессиональный литературный перевод следующего текста на английский,
+        при этом оставь html теги, ссылки и прочие не относящиеся к тексту
+        элементы неизменными. Также, сохрани смысл и изначальную стилистику
+        текста: \"{text}\".
+        """
+
+        tokens_estimate = len(prompt.split()) * 1.5
+
+        # Manage rate limits before sending request
+        can_proceed = await manage_rate_limit(tokens_estimate)
+        if not can_proceed:
+            return text  # Returns original text if limits exceed
+
+        response = openai.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=3000,
+            temperature=0.7
+        )
+
+        article = response.choices[0].message.content.strip()
+
+        logging.info("Translation successful.")
+
+        return article
+    except Exception as e:
+        logging.error(f"Error in ai_translator_eng: {e}")
+
+        return text  # Returns original text in case of an error
+
+
 # Handling button pressing
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    user_id = query.from_user.id
+    # user_id = query.from_user.id
     await query.answer()
 
-    if query.data == 'confirm':
+    if query.data.startswith('confirm'):
         return
         raw = query.message.photo[-1].file_id
         file_info = await context.bot.get_file(raw)
@@ -292,7 +339,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "", query.message.text_html or query.message.caption_html, f.read())
         await query.edit_message_reply_markup()
     elif query.data.startswith('delete'):
-        message_id = query.message.message_id
+        # message_id = query.message.message_id
         await query.delete_message()
     elif query.data == 'expand':
         # Extract original text or caption to expand
@@ -306,18 +353,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_to_message_id=query.message.message_id,
             reply_markup=article_reply_markup
         )
-    elif query.data == 'confirm_article':
-        return
-        raw = query.message.reply_to_message.photo[-1].file_id
-        file_info = await context.bot.get_file(raw)
-        f = BytesIO(await file_info.download_as_bytearray())
-        db.addpost(
-            "", query.message.reply_to_message.text_html or query.message.reply_to_message.caption_html, f.read(), query.message.text_html)
+    # elif query.data == 'confirm_article':
+    #     return
+        # raw = query.message.reply_to_message.photo[-1].file_id
+        # file_info = await context.bot.get_file(raw)
+        # f = BytesIO(await file_info.download_as_bytearray())
+        # db.addpost(
+        #     "", query.message.reply_to_message.text_html or query.message.reply_to_message.caption_html, f.read(), query.message.text_html)
 
-        await query.message.reply_to_message.edit_reply_markup()
-        await query.edit_message_reply_markup()
-    elif query.data == 'delete_article':
-        await query.delete_message()
+        # await query.message.reply_to_message.edit_reply_markup()
+        # await query.edit_message_reply_markup()
+    # elif query.data == 'delete_article':
+    #     await query.delete_message()
     elif query.data == 'generate_article':
         # Extracting user's original message
         original_message = query.message.reply_to_message
@@ -360,6 +407,34 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Deleting message with suggestion to generate an article
         await query.delete_message()
+    elif query.data == 'translate_eng':
+        original_text = query.message.text_html or query.message.caption_html
+        original_message = query.message
+        translated_text = await ai_translator_eng(original_text)
+
+        if original_message.photo:
+            await context.bot.send_photo(
+                chat_id=original_message.chat_id,
+                photo=original_message.photo[-1].file_id,
+                caption=translated_text,
+                reply_to_message_id=original_message.message_id,
+                reply_markup=reply_markup_eng
+            )
+        elif original_message.video:
+            await context.bot.send_video(
+                chat_id=original_message.chat.id,
+                video=original_message.video.file_id,
+                caption=translated_text,
+                reply_to_message_id=original_message.message.id,
+                reply_markup=reply_markup_eng
+            )
+        else:
+            await context.bot.send_message(
+                chat_id=original_message.chat_id,
+                text=translated_text,
+                reply_to_message_id=original_message.message_id,
+                reply_markup=reply_markup_eng
+            )
 
 
 # Register handlers with more specific filters
