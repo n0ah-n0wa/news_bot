@@ -94,9 +94,9 @@ async def manage_rate_limit(tokens_used):
 # Handling messages from news_bot
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logging.info(
-        f"Received message from news_bot with content: {update.message.text_html or '<Нет текста>'}")
+        f"Received message from news_bot with content: {update.message.text_html or ' '}")
 
-    text = update.message.text_html or update.message.caption_html or "<Нет текста>"
+    text = update.message.text_html or update.message.caption_html or " "
 
     for chat_id in user_chat_ids:
         sent_message = None
@@ -107,7 +107,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 chat_id=chat_id,
                 photo=update.message.photo[-1].file_id,
                 caption=text,
-                reply_markup=reply_markup, parse_mode="html"
+                reply_markup=reply_markup,parse_mode="html"
             )
         # Handle video messages
         elif update.message.video:
@@ -115,7 +115,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 chat_id=chat_id,
                 video=update.message.video.file_id,
                 caption=text,
-                reply_markup=reply_markup, parse_mode="html"
+                reply_markup=reply_markup,parse_mode="html"
             )
         # Handle document messages
         elif update.message.document:
@@ -123,14 +123,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 chat_id=chat_id,
                 document=update.message.document.file_id,
                 caption=text,
-                reply_markup=reply_markup, parse_mode="html"
+                reply_markup=reply_markup,parse_mode="html"
             )
         # Handle text messages or other types
         else:
             sent_message = await context.bot.send_message(
                 chat_id=chat_id,
                 text=text,
-                reply_markup=reply_markup, parse_mode="html"
+                reply_markup=reply_markup,parse_mode="html"
             )
 
         # Track the message for each user
@@ -153,32 +153,32 @@ async def handle_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.photo:
         input_media = InputMediaPhoto(
             media=update.message.photo[-1].file_id,
-            caption=update.message.caption_html or reply_to_message.caption_html or "<Нет текста>"
+            caption=update.message.caption_html or reply_to_message.caption_html or " ",parse_mode="html"
         )
     elif update.message.video:
         input_media = InputMediaVideo(
             media=update.message.video.file_id,
-            caption=update.message.caption_html or reply_to_message.caption_html or "<Нет текста>"
+            caption=update.message.caption_html or reply_to_message.caption_html or " ",parse_mode="html"
         )
 
     # Editing media or/and text
     if input_media:
         await reply_to_message.edit_media(
             media=input_media,
-            reply_markup=reply_markup
+            reply_markup=reply_markup,parse_mode="html"
         )
     elif update.message.text_html:
         # If original message has media - editing caption
         if reply_to_message.photo or reply_to_message.video:
             await reply_to_message.edit_caption(
                 caption=update.message.text_html,
-                reply_markup=reply_markup
+                reply_markup=reply_markup,parse_mode="html"
             )
         # If it was plain text - editing text
         else:
             await reply_to_message.edit_text(
                 text=update.message.text_html,
-                reply_markup=reply_markup
+                reply_markup=reply_markup,parse_mode="html"
             )
 
     # Deleting user's reply message
@@ -192,7 +192,7 @@ async def generate_article(text):
         prompt = f"""
         Расширь этот пост в статью объемом 2500-3000 символов,
         сохраняя общий смысл и соблюдая стиль профессиональной
-        новостной журналистики: \"{text}\"
+        новостной журналистики. При этом сохраняй ссылки и html теги: \"{text}\"
         """
 
         tokens_estimate = len(prompt.split()) * 1.5
@@ -219,7 +219,7 @@ async def generate_article(text):
 
         return text  # Returns original text in case of an error
 
-
+# import db
 # Handling button pressing
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -232,7 +232,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         file_info = await context.bot.get_file(raw)
         f = BytesIO(await file_info.download_as_bytearray())
         db.addpost(
-            " ", query.message.text_html or query.message.caption_html, f.read())
+            "", query.message.text_html or query.message.caption_html, f.read())
         await query.edit_message_reply_markup()
     elif query.data.startswith('delete'):
         message_id = query.message.message_id
@@ -251,11 +251,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     elif query.data == 'confirm_article':
         return
-        raw = query.message.photo[-1].file_id
+        raw = query.message.reply_to_message.photo[-1].file_id
         file_info = await context.bot.get_file(raw)
         f = BytesIO(await file_info.download_as_bytearray())
         db.addpost(
-            " ", query.message.text_html or query.message.caption_html, f.read())
+            "", query.message.reply_to_message.text_html or query.message.reply_to_message.caption_html, f.read(), query.message.text_html)
+        
+        await query.message.reply_to_message.edit_reply_markup()
         await query.edit_message_reply_markup()
     elif query.data == 'delete_article':
         await query.delete_message()

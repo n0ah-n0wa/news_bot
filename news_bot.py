@@ -1,4 +1,4 @@
-import time
+import time,telethon.tl.types
 from telethon.sync import TelegramClient
 from telethon.tl.types import MessageMediaPhoto, MessageMediaDocument
 from telethon import events
@@ -80,6 +80,40 @@ async def manage_rate_limit(tokens_used):
 @client.on(events.NewMessage(chats=channel_ids))
 async def handler(event):
     message = event.message
+    raw_text = message.message
+    html_text = raw_text
+
+    # Iterate over the message entities (bold, italic, links, etc.)
+    if message.entities:
+        html_text = raw_text
+        offset_adjustment = 0  # To account for increased length when adding HTML tags
+
+        for entity in message.entities:
+            start = entity.offset + offset_adjustment-1
+            end = start + entity.length
+            if isinstance(entity, telethon.tl.types.MessageEntityTextUrl):
+                text = html_text[start:end]
+                url = entity.url
+                html_text = html_text[:start] + f'<a href="{url}">' + text + '</a>' + html_text[end:]
+                offset_adjustment += 15 + len(url)  # Length for <a href="url"></a>
+
+            elif isinstance(entity, telethon.tl.types.MessageEntityUrl):
+                url = html_text[start:end]
+                html_text = html_text[:start] + f'<a href="{url}">' + url + '</a>' + html_text[end:]
+                offset_adjustment += 15 + len(url)  # Length for <a href="url"></a>
+            
+            elif isinstance(entity, telethon.tl.types.MessageEntityBold):
+                # Add <b> tags for bold text
+                html_text = html_text[:start] + '<b>' + html_text[start:end] + '</b>' + html_text[end:]
+                offset_adjustment += 7  # 7 characters for <b></b>
+
+            elif isinstance(entity, telethon.tl.types.MessageEntityItalic):
+                html_text = html_text[:start] + '<i>' + html_text[start:end] + '</i>' + html_text[end:]
+                offset_adjustment += 7  # 7 characters for <i></i>
+
+            elif isinstance(entity, telethon.tl.types.MessageEntityBlockquote):
+                html_text = html_text[:start] + '<blockquote>' + html_text[start:end] + '</blockquote>' + html_text[end:]
+                offset_adjustment += 25
 
     if message.text:
         logging.info(f"Message received: {message.text}...")
@@ -92,8 +126,8 @@ async def handler(event):
             return
 
         # Rewriting text
-        # rewritten_text = await rewrite_text(message.text)
-        rewritten_text = message.text  # TEST
+        # rewritten_text = await rewrite_text(html_text)
+        rewritten_text = html_text  # TEST
 
         # Forwarding message with media to telegram_bot
         await forward_message_to_bot(message, rewritten_text)
@@ -137,7 +171,7 @@ async def rewrite_text(text):
         prompt = f"""
         Сделай глубокий рерайт следующего текста,
         а также сохрани прямые цитаты без изменений, если таковые в тексте есть.
-        Обрати внимание, что результат ты должен вернуть на русском языке: \"{text}\"
+        Обрати внимание, что результат ты должен вернуть на русском языке, и сохранить html теги: \"{text}\"
         """
         # Approximate tokens count per request
         tokens_estimate = len(prompt.split()) * 1.5
