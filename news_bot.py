@@ -17,10 +17,10 @@ logging.basicConfig(
 )
 
 # Access parameters
-api_id = '20772977'
-api_hash = '0bacdd9a8621f8f907a58ff3870219a5'
-openai_api_key = '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'
-bot_username = '@newewews_bot'
+api_id = 'TELEGRAM_API_ID'
+api_hash = 'TELEGRAM_API_HASH'
+openai_api_key = 'YOUR_OPENAI_KEY'
+bot_username = 'YOUR_BOT_USERNAME'
 
 # API rate limits
 MAX_TOKENS_PER_MINUTE = 40000
@@ -38,7 +38,7 @@ client = TelegramClient('session_name', api_id, api_hash)
 openai.api_key = openai_api_key
 
 # Channels list to monitor
-channel_ids = [-1001479815768, -1001222869173, -1002401857796]
+channel_ids = ['IDS_OF_CHANNELS_FOR_TRACKING']
 
 
 # managing API limits
@@ -86,8 +86,8 @@ async def handler(event):
 
         # Check content type (Advertising, Opinion, News)
         content_type = await check_content_type(message.text)
-        # Add 'Мнение' here to skip posts with personal opinion
-        if content_type in ['Реклама']:
+        # Add 'Opinion' here to skip posts with personal opinion
+        if content_type in ['Advert']:
             logging.info(f"Skipping a message of a type: {content_type}")
             return
 
@@ -102,9 +102,9 @@ async def handler(event):
 async def check_content_type(text):
     try:
         prompt = f"""
-        Определи, является ли данный текст рекламой, личным мнением или новостью: \"{text}\".
-        Если реклама, ответь одним словом \"Реклама\". Если личное мнение, ответь \"Мнение\".
-        Если новость, ответь \"Новость\".
+        Determine whether the text is an advert, personal opinion or news story: \"{text}\".
+        If it's an advert, answer in one word \"Advert\". If it's a personal opinion, answer \"Opinion\".
+        If it's news story, answer \"News\".
         """
         # Approximate tokens count per request
         tokens_estimate = len(prompt.split()) * 1.5
@@ -134,9 +134,9 @@ async def check_content_type(text):
 async def rewrite_text(text):
     try:
         prompt = f"""
-        Сделай глубокий рерайт следующего текста, но оставь общий смысл неизменным,
-        а также сохрани прямые цитаты без изменений, если таковые в тексте есть.
-        Обрати внимание, что результат ты должен вернуть на русском языке: \"{text}\"
+        Do a deep rewrite of the following text, but leave the overall meaning unchanged,
+        as well as keep direct quotations unchanged, if any in the text.
+        Note that you should return the result in the language of original text: \"{text}\"
         """
         # Approximate tokens count per request
         tokens_estimate = len(prompt.split()) * 1.5

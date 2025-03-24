@@ -13,9 +13,9 @@ logging.basicConfig(
 )
 
 # Bot token and user list
-TOKEN = '7354476983:AAG8judAhTygD-dMCZOvwcofHAZyNGdi5EY'
-user_chat_ids = [490748903, 452536082]
-news_bot_id = 7491816403  # news_bot account ID
+TOKEN = 'YOUR_BOT_TOKEN'
+user_chat_ids = ['IDS_HERE']
+news_bot_id = 'ID_HERE'  # news_bot account ID
 message_tracker = {}  # Dictionary for tracking user messages
 
 # Application initialization
@@ -37,9 +37,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Create keyboard with buttons
         keyboard = [[
-            InlineKeyboardButton("Подтвердить", callback_data='confirm'),
+            InlineKeyboardButton("Confirm", callback_data='confirm'),
             InlineKeyboardButton(
-                "Удалить", callback_data=f'delete_{message_id}')
+                "Delete", callback_data=f'delete_{message_id}')
         ]]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -50,7 +50,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.send_photo(
                     chat_id=chat_id,
                     photo=update.message.photo[-1].file_id,
-                    caption=update.message.caption or "<Нет текста>",
+                    caption=update.message.caption or "<No text>",
                     reply_markup=reply_markup
                 )
             # Handle document messages
@@ -58,14 +58,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.send_document(
                     chat_id=chat_id,
                     document=update.message.document.file_id,
-                    caption=update.message.caption or "<Нет текста>",
+                    caption=update.message.caption or "<No text>",
                     reply_markup=reply_markup
                 )
             # Handle text messages or other types
             else:
                 await context.bot.send_message(
                     chat_id=chat_id,
-                    text=update.message.text or "<Нет текста>",
+                    text=update.message.text or "<No text>",
                     reply_markup=reply_markup
                 )
 
