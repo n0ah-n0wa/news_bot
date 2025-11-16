@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  news-bot:
+    build: .
+    container_name: news-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      # Mount logs directory for persistence
+      - ./logs:/app/logs
+      # Mount session files for Telegram client (Telethon sessions)
+      - ./sessions:/app/sessions
+      # Optional: Mount source code for development (comment out for production)
+      # - ./src:/app/src
+    environment:
+      - PYTHONPATH=/app/src
+      - PYTHONUNBUFFERED=1
+    # Uncomment if you need to expose ports
+    # ports:
+    #   - "8000:8000"
+    # Health check
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+
+# Optional: Add a monitoring service
+# prometheus:
+#   image: prom/prometheus:latest
+#   container_name: news-bot-prometheus
+#   ports:
+#     - "9090:9090"
+#   volumes:
+#     - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+#   command:
+#     - '--config.file=/etc/prometheus/prometheus.yml'
+#     - '--storage.tsdb.path=/prometheus'
+#     - '--web.console.libraries=/etc/prometheus/console_libraries'
+#     - '--web.console.templates=/etc/prometheus/consoles'
+
+volumes:
+  logs:
+  sessions:
+
+
+
+
