@@ -2,6 +2,8 @@
 
 **AI-assisted news curation pipeline for Telegram.**
 
+In production since 2024 for a client's editorial team. The production deployment runs from a private repo; this is the cleaned-up public version.
+
 News Bot monitors a configurable set of Telegram channels in real time, uses an OpenAI language model to classify each post and filter out advertising, rewrites the remaining content into original copy that keeps the meaning (and direct quotations) intact, and delivers the result, together with the original media, to a team of editors. Editors review every item inside Telegram and approve or discard it with one tap.
 
 The system is a human-in-the-loop content pipeline: AI handles the high-volume, repetitive work (screening and rewriting), while editorial decisions stay with people.

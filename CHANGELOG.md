@@ -24,6 +24,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+The production deployment runs from a private repo; this is the cleaned-up public version. The issues below were introduced in the 2025 modular refactor on this public tree and did not affect the live client deployment.
+
 - The Telethon client was never connected: `start()` and `disconnect()` were called without `await` inside the running event loop.
 - Numeric channel IDs from `TELEGRAM_CHANNEL_IDS` were passed as strings, which Telethon interprets as phone numbers. They are now converted to integers, and whitespace around list items is trimmed.
 - INFO logs from `NewsParser` and `TelegramBot` were dropped because their loggers were not children of the configured application logger.
