@@ -6,9 +6,11 @@ import sys
 from typing import Optional
 from pathlib import Path
 
+APP_LOGGER_NAME = "news_bot"
+
 
 def setup_logger(
-    name: str = "news_bot",
+    name: str = APP_LOGGER_NAME,
     log_level: str = "INFO",
     log_file: Optional[str] = None,
     log_format: Optional[str] = None
@@ -59,7 +61,7 @@ def setup_logger(
     return logger
 
 
-def get_logger(name: str = "news_bot") -> logging.Logger:
+def get_logger(name: str = APP_LOGGER_NAME) -> logging.Logger:
     """
     Get an existing logger instance.
 
@@ -77,8 +79,14 @@ class LoggerMixin:
 
     @property
     def logger(self) -> logging.Logger:
-        """Get logger for this class."""
-        return get_logger(f"{self.__class__.__module__}.{self.__class__.__name__}")
+        """
+        Get logger for this class.
+
+        The logger is a child of the application logger, so records
+        propagate to the handlers configured by setup_logger().
+        """
+        return get_logger(
+            f"{APP_LOGGER_NAME}.{self.__class__.__module__}.{self.__class__.__name__}")
 
 
 

@@ -1,301 +1,195 @@
 # News Bot
 
-A professional Telegram bot application that monitors news channels, processes content with AI, and forwards relevant news to users with interactive controls.
+**AI-assisted news curation pipeline for Telegram.**
 
-## Architecture
+News Bot monitors a configurable set of Telegram channels in real time, uses an OpenAI language model to classify each post and filter out advertising, rewrites the remaining content into original copy that keeps the meaning (and direct quotations) intact, and delivers the result, together with the original media, to a team of editors. Editors review every item inside Telegram and approve or discard it with one tap.
 
-The project follows a modular, professional structure:
+The system is a human-in-the-loop content pipeline: AI handles the high-volume, repetitive work (screening and rewriting), while editorial decisions stay with people.
 
+---
+
+## Table of Contents
+
+- [Key Features](#key-features)
+- [How It Works](#how-it-works)
+- [Technology Stack](#technology-stack)
+- [Quick Start](#quick-start)
+- [Configuration](#configuration)
+- [Project Structure](#project-structure)
+- [Testing](#testing)
+- [Documentation](#documentation)
+- [Roadmap](#roadmap)
+
+---
+
+## Key Features
+
+| Area                  | Capability                                                                                                    |
+| --------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Real-time ingestion   | Listens to any number of Telegram channels via the MTProto user API; no polling and no admin rights required. |
+| AI classification     | Labels each post as `News`, `Opinion`, or `Advert`; advertising is discarded before it reaches editors.       |
+| AI rewriting          | Deep rewrite that preserves meaning and verbatim quotations and keeps the source language.                    |
+| Media preservation    | Photos, videos, and documents attached to the source post are forwarded together with the rewritten text.     |
+| Editorial review      | Each item is delivered to every configured editor with inline **Confirm** and **Delete** actions.            |
+| Cost control          | Built-in request and token budget (per minute and per day) for the OpenAI API.                                |
+| Graceful degradation  | If the AI step fails or the budget runs out, the pipeline keeps running and forwards content unmodified.      |
+| Operations            | Environment-driven configuration, structured logging, graceful shutdown, Docker image, and Compose stack with resource limits. |
+
+## How It Works
+
+```mermaid
+flowchart LR
+    subgraph Sources["Source channels"]
+        C1["Channel A"]
+        C2["Channel B"]
+        C3["Channel N"]
+    end
+
+    subgraph App["News Bot process"]
+        NP["News Parser<br/>(Telethon user client)"]
+        AI{{"OpenAI<br/>Chat Completions"}}
+        TB["Editorial Bot<br/>(python-telegram-bot)"]
+    end
+
+    E1["Editor 1"]
+    E2["Editor 2"]
+
+    C1 & C2 & C3 -- "new post" --> NP
+    NP -- "1. classify" --> AI
+    NP -- "2. rewrite" --> AI
+    NP -- "3. relay text + media" --> TB
+    TB -- "review card<br/>Confirm / Delete" --> E1 & E2
 ```
-news-bot/
-├── src/
-│   ├── __init__.py         # Package exports
-│   ├── bot/                # Telegram bot (working with the admin)
-│   │   ├── __init__.py
-│   │   └── telegram_bot.py
-│   ├── news_parser/        # Channel monitoring and rewriting logic
-│   │   ├── __init__.py
-│   │   └── news_bot.py
-│   ├── core/               # General utilities (configs, logging, rate limiter)
-│   │   ├── __init__.py
-│   │   ├── config.py
-│   │   └── logger.py
-│   └── main.py             # Entry point
-├── tests/                  # Test files
-│   ├── __init__.py
-│   ├── conftest.py         # Pytest configuration
-│   └── test_sample.py
-├── .env.example            # Example environment variables
-├── requirements.txt        # Python dependencies
-├── pyproject.toml          # Package configuration
-├── Dockerfile              # Docker image definition
-├── docker-compose.yml      # Docker Compose configuration
-└── README.md
-```
 
-## Features
+1. **Ingest.** A Telethon client, authenticated as a regular Telegram account, subscribes to `NewMessage` events from the configured channels.
+2. **Classify.** The post text is sent to the model with a constrained, single-word classification prompt. Posts labelled `Advert` are dropped.
+3. **Rewrite.** The remaining posts are rewritten with a second prompt that preserves meaning, direct quotes, and the original language.
+4. **Relay.** The user client sends the rewritten text, with the original media attached, to the editorial bot in a private chat.
+5. **Distribute and review.** The bot recognises the relay account by its user ID and copies the item to every editor as a review card with inline actions.
 
-- **Channel Monitoring**: Automatically monitors specified Telegram channels for new messages
-- **AI Content Processing**: Uses OpenAI GPT to classify and rewrite news content
-- **Smart Filtering**: Filters out advertisements and personal opinions, keeping only news
-- **Interactive Controls**: Users can confirm or delete forwarded messages
-- **Rate Limiting**: Built-in API rate limiting to prevent exceeding OpenAI limits
-- **Professional Logging**: Comprehensive logging system with file and console output
-- **Docker Support**: Ready for containerized deployment
-- **Modular Design**: Clean separation of concerns for maintainability
+A detailed walkthrough, including sequence diagrams and design rationale, is available in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-## Prerequisites
+## Technology Stack
 
-- Python 3.8+
-- Telegram API credentials (from [my.telegram.org](https://my.telegram.org/apps))
-- OpenAI API key (from [platform.openai.com](https://platform.openai.com/api-keys))
-- Docker (optional, for containerized deployment)
+| Layer               | Technology                                                                |
+| ------------------- | ------------------------------------------------------------------------- |
+| Language / runtime  | Python 3.8+ (`asyncio`); container image based on Python 3.11             |
+| Channel ingestion   | [Telethon](https://github.com/LonamiWebs/Telethon) (Telegram MTProto API) |
+| Bot interface       | [python-telegram-bot](https://python-telegram-bot.org/) v20+ (Bot API)    |
+| AI                  | [OpenAI Python SDK](https://github.com/openai/openai-python) v1+, Chat Completions API, `gpt-3.5-turbo` by default (configurable) |
+| Configuration       | Environment variables (optionally from `.env` via python-dotenv) mapped to typed `dataclasses` |
+| Testing             | pytest, pytest-asyncio, pytest-cov, `unittest.mock`                       |
+| Packaging / deploy  | `pyproject.toml` (setuptools), Docker, Docker Compose                     |
 
-## Installation
+The full breakdown, with the role of each dependency and the reasons it was chosen, is in [docs/TECH_STACK.md](docs/TECH_STACK.md).
 
-### 1. Clone the Repository
+## Quick Start
+
+### Prerequisites
+
+- Python 3.8 or newer (or Docker)
+- Telegram API credentials (`api_id`, `api_hash`) from [my.telegram.org](https://my.telegram.org/apps)
+- A bot token from [@BotFather](https://t.me/BotFather)
+- An OpenAI API key from [platform.openai.com](https://platform.openai.com/api-keys)
+
+### Run locally
 
 ```bash
-git clone <repository-url>
-cd news-bot
-```
+git clone https://github.com/n0ah-n0wa/news_bot.git
+cd news_bot
 
-### 2. Install Dependencies
+python -m venv .venv
+source .venv/bin/activate            # Windows: .venv\Scripts\activate
 
-**Option A: Using pip (recommended for development)**
-```bash
-pip install -e .
-```
+pip install -e ".[dev]"
 
-**Option B: Using requirements.txt**
-```bash
-pip install -r requirements.txt
-```
+cp .env.example .env                 # then fill in your credentials
 
-**For development with testing:**
-```bash
-pip install -e ".[test]"
-```
-
-### 3. Configuration
-
-1. Copy the example environment file:
-
-   ```bash
-   cp .env.example .env
-   ```
-
-2. Edit `.env` with your actual credentials:
-
-   ```env
-   # Telegram API Configuration
-   TELEGRAM_API_ID=your_telegram_api_id
-   TELEGRAM_API_HASH=your_telegram_api_hash
-
-   # Telegram Bot Configuration
-   TELEGRAM_BOT_TOKEN=your_bot_token
-   TELEGRAM_BOT_USERNAME=your_bot_username
-   TELEGRAM_NEWS_BOT_ID=your_news_bot_account_id
-   TELEGRAM_USER_CHAT_IDS=user_id_1,user_id_2,user_id_3
-   TELEGRAM_CHANNEL_IDS=channel_id_1,channel_id_2,channel_id_3
-
-   # OpenAI Configuration
-   OPENAI_API_KEY=your_openai_api_key
-   ```
-
-### 4. Get Required IDs
-
-#### Telegram API Credentials
-
-1. Go to [my.telegram.org](https://my.telegram.org/apps)
-2. Create a new application
-3. Get your `api_id` and `api_hash`
-
-#### Bot Token
-
-1. Message [@BotFather](https://t.me/BotFather) on Telegram
-2. Create a new bot with `/newbot`
-3. Get your bot token
-
-#### User and Channel IDs
-
-1. **User Chat IDs**: Message [@userinfobot](https://t.me/userinfobot) to get your user ID
-2. **Channel IDs**: Use [@getidsbot](https://t.me/getidsbot) or forward a message from the channel to get the channel ID
-3. **News Bot ID**: This is the user ID of the account that will send messages to your bot
-
-## Usage
-
-### Local Development
-
-```bash
-# Run the application
 python -m src.main
-
-# Or if installed as package:
-python src/main.py
 ```
 
-### Docker Deployment
+`.env` in the working directory is loaded automatically. On the first launch Telethon asks for the phone number and login code of the account that reads the channels. The session is saved to `sessions/` and reused on subsequent runs. Stop the application with `Ctrl+C`.
+
+### Run with Docker Compose
 
 ```bash
-# Build and run with Docker Compose
-docker-compose up --build
-
-# Run in background
-docker-compose up -d --build
+cp .env.example .env                 # then fill in your credentials
+docker compose run --rm news-bot     # first run only: interactive Telegram login
+docker compose up -d --build
+docker compose logs -f news-bot
 ```
 
-### Docker Commands
+See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for volume permissions, log persistence, and operational guidance.
 
-```bash
-# Build the image
-docker build -t news-bot .
+## Configuration
 
-# Run the container
-docker run --env-file .env news-bot
+All settings come from environment variables; a `.env` file in the working directory is loaded automatically. The most important ones:
 
-# View logs
-docker-compose logs -f news-bot
+| Variable                 | Purpose                                                          |
+| ------------------------ | ---------------------------------------------------------------- |
+| `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` | MTProto credentials of the account that reads the channels |
+| `TELEGRAM_BOT_TOKEN`     | Token of the editorial bot                                       |
+| `TELEGRAM_BOT_USERNAME`  | Username of the editorial bot, used as the relay target          |
+| `TELEGRAM_NEWS_BOT_ID`   | Numeric user ID of the relay account, trusted by the bot         |
+| `TELEGRAM_CHANNEL_IDS`   | Comma-separated source channels (`@username` or `-100…` IDs)     |
+| `TELEGRAM_USER_CHAT_IDS` | Comma-separated list of editor chat IDs                          |
+| `OPENAI_API_KEY`         | OpenAI API key                                                   |
+| `OPENAI_MODEL`           | Chat model (default `gpt-3.5-turbo`)                             |
+
+The complete reference, with defaults and instructions for obtaining each value, is in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+
+## Project Structure
+
+```
+news_bot/
+├── src/
+│   ├── main.py                 # Application orchestrator: setup, lifecycle, graceful shutdown
+│   ├── core/
+│   │   ├── config.py           # Typed configuration (dataclasses) loaded from the environment
+│   │   └── logger.py           # Logging setup and LoggerMixin
+│   ├── news_parser/
+│   │   └── news_bot.py         # Telethon listener, AI classification and rewriting, RateLimiter, relay
+│   └── bot/
+│       └── telegram_bot.py     # Editorial bot: fan-out, inline actions, commands, MessageTracker
+├── tests/
+│   ├── conftest.py             # Test path setup
+│   └── test_sample.py          # Unit tests for config, logging, rate limiter, parser, bot, and lifecycle
+├── docs/                       # Project documentation
+├── .env.example                # Configuration template
+├── pyproject.toml              # Package metadata and dependency groups
+├── requirements.txt            # Runtime dependencies
+├── Dockerfile                  # Container image (non-root user)
+└── docker-compose.yml          # Single-service stack with volumes and resource limits
 ```
 
 ## Testing
 
 ```bash
-# Install test dependencies (if not already installed)
 pip install -e ".[test]"
-
-# Run all tests
-pytest tests/
-
-# Run with verbose output
-pytest tests/ -v
-
-# Run specific test file
-pytest tests/test_sample.py -v
-
-# Run with coverage
-pytest tests/ --cov=src --cov-report=html
+pytest                                  # run the suite
+pytest -v --cov=src --cov-report=html   # with coverage report
 ```
 
-## Configuration Options
+External services (Telegram and OpenAI) are mocked, so the suite runs offline and needs no credentials. See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for the testing approach and contribution workflow.
 
-### Environment Variables
+## Documentation
 
-| Variable                  | Description                     | Default         |
-| ------------------------- | ------------------------------- | --------------- |
-| `TELEGRAM_API_ID`         | Telegram API ID                 | Required        |
-| `TELEGRAM_API_HASH`       | Telegram API Hash               | Required        |
-| `TELEGRAM_BOT_TOKEN`      | Bot token from @BotFather       | Required        |
-| `TELEGRAM_BOT_USERNAME`   | Bot username                    | Required        |
-| `TELEGRAM_NEWS_BOT_ID`    | News bot account ID             | Required        |
-| `TELEGRAM_USER_CHAT_IDS`  | Comma-separated user IDs        | Required        |
-| `TELEGRAM_CHANNEL_IDS`    | Comma-separated channel IDs     | Required        |
-| `OPENAI_API_KEY`          | OpenAI API key                  | Required        |
-| `OPENAI_MODEL`            | OpenAI model to use             | `gpt-3.5-turbo` |
-| `OPENAI_MAX_TOKENS`       | Max tokens per request          | `500`           |
-| `OPENAI_TEMPERATURE`      | Response randomness             | `0.0`           |
-| `MAX_TOKENS_PER_MINUTE`   | Rate limit: tokens per minute   | `40000`         |
-| `MAX_REQUESTS_PER_MINUTE` | Rate limit: requests per minute | `3`             |
-| `MAX_REQUESTS_PER_DAY`    | Rate limit: requests per day    | `200`           |
-| `LOG_LEVEL`               | Logging level                   | `INFO`          |
-| `LOG_FILE`                | Log file path                   | `news_bot.log`  |
+| Document                                         | Contents                                                                   |
+| ------------------------------------------------ | -------------------------------------------------------------------------- |
+| [Architecture](docs/ARCHITECTURE.md)             | Components, data flow, sequence diagrams, concurrency model, design decisions |
+| [Technology Stack](docs/TECH_STACK.md)           | Every library and service used, and why                                    |
+| [AI Processing](docs/AI_PROCESSING.md)           | Prompt design, model parameters, rate limiting, failure strategy           |
+| [Configuration](docs/CONFIGURATION.md)           | Full environment variable reference and credential setup                   |
+| [Deployment](docs/DEPLOYMENT.md)                 | Local and containerised deployment, authentication, operations             |
+| [Development](docs/DEVELOPMENT.md)               | Local setup, testing strategy, code conventions, extension points          |
+| [Changelog](CHANGELOG.md)                        | Project history and notable changes                                        |
 
-## Development
+## Roadmap
 
-### Project Structure
+- Persist review state and an audit trail in a database (SQLite or PostgreSQL) instead of process memory.
+- Publish approved items to target channels automatically on **Confirm**.
+- Add editor actions explored in earlier iterations: in-place editing by reply, expansion into long-form articles, on-demand article generation, and machine translation.
+- Move to the asynchronous OpenAI client and structured (JSON) model outputs.
+- Add duplicate detection across sources.
 
-- **`src/core/`**: Core utilities (configuration, logging)
-- **`src/bot/`**: Telegram bot implementation
-- **`src/news_parser/`**: News monitoring and processing
-- **`src/main.py`**: Application entry point
-- **`tests/`**: Test files
-
-### Adding New Features
-
-1. **New Bot Commands**: Add handlers in `src/bot/telegram_bot.py`
-2. **New Content Processing**: Extend classes in `src/news_parser/`
-3. **Configuration**: Add new settings to `src/core/config.py`
-4. **Logging**: Use the `LoggerMixin` class for consistent logging
-
-### Code Style
-
-- Follow PEP 8 guidelines
-- Use type hints
-- Add docstrings to all functions and classes
-- Write tests for new functionality
-
-## Logging
-
-The application provides comprehensive logging:
-
-- **Console Output**: Real-time logs in the terminal
-- **File Output**: Persistent logs saved to `news_bot.log`
-- **Structured Logging**: Consistent format across all components
-- **Log Levels**: DEBUG, INFO, WARNING, ERROR, CRITICAL
-
-## Troubleshooting
-
-### Common Issues
-
-1. **"Configuration validation failed"**
-
-   - Check that all required environment variables are set
-   - Verify API keys and IDs are correct
-
-2. **"Rate limit reached"**
-
-   - The bot has hit OpenAI rate limits
-   - Wait for the rate limit window to reset
-   - Consider adjusting rate limit settings
-
-3. **"Message not forwarded"**
-
-   - Check that user chat IDs are correct
-   - Verify bot has permission to send messages to users
-
-4. **"Channel not monitored"**
-   - Ensure channel IDs are correct
-   - Check that the bot has access to the channels
-
-### Debug Mode
-
-Enable debug logging by setting:
-
-```env
-LOG_LEVEL=DEBUG
-```
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests for new functionality
-5. Submit a pull request
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Support
-
-For support and questions:
-
-- Create an issue in the repository
-- Check the troubleshooting section
-- Review the logs for error messages
-
-## Changelog
-
-### Version 1.0.0
-
-- Initial release
-- Modular architecture
-- Docker support
-- Comprehensive logging
-- Rate limiting
-- Interactive message controls
-
-
-
-
+Known limitations and the reasoning behind current trade-offs are listed in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#known-limitations).

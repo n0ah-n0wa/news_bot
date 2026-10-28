@@ -2,14 +2,12 @@
 News parser module for monitoring Telegram channels and processing news content.
 """
 import time
-import asyncio
-from typing import List, Optional
-from telethon.sync import TelegramClient
-from telethon import events
+from pathlib import Path
+from telethon import TelegramClient, events
 from telethon.tl.types import Message
 import openai
 
-from core.config import AppConfig, TelegramConfig, OpenAIConfig, RateLimitConfig
+from core.config import AppConfig, RateLimitConfig
 from core.logger import LoggerMixin
 
 
@@ -79,8 +77,11 @@ class NewsParser(LoggerMixin):
             self.logger.warning(
                 f"Invalid api_id '{config.telegram.api_id}', using default: {api_id}")
 
+        session_path = Path(config.telegram.session_path)
+        session_path.parent.mkdir(parents=True, exist_ok=True)
+
         self.client = TelegramClient(
-            'news_bot_session',
+            str(session_path),
             api_id,
             config.telegram.api_hash
         )
@@ -241,19 +242,23 @@ class NewsParser(LoggerMixin):
             self.logger.error(f"Error when forwarding message: {e}")
 
     async def start(self) -> None:
-        """Start the news parser."""
+        """
+        Connect and authorize the Telegram client.
+
+        On the first run Telethon prompts for the phone number and login code;
+        the authorized session is then reused from the session file.
+        """
         self.logger.info("Starting news parser...")
-        self.client.start()
-        # Keep the client running without blocking
-        try:
-            while True:
-                await asyncio.sleep(1)
-        except asyncio.CancelledError:
-            self.logger.info("News parser start loop cancelled")
-            raise
+        await self.client.start()
+        self.logger.info(
+            f"News parser connected, monitoring {len(self.config.telegram.channel_ids)} channel(s)")
+
+    async def run_until_disconnected(self) -> None:
+        """Wait until the Telegram client disconnects."""
+        await self.client.run_until_disconnected()
 
     async def stop(self) -> None:
         """Stop the news parser."""
         self.logger.info("Stopping news parser...")
         if self.client.is_connected():
-            self.client.disconnect()
+            await self.client.disconnect()

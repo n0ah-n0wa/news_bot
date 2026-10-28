@@ -2,8 +2,10 @@
 Configuration management for the news bot application.
 """
 import os
-from typing import List, Optional
+from typing import List, Union
 from dataclasses import dataclass
+
+ChatIdentifier = Union[int, str]
 
 
 @dataclass
@@ -15,7 +17,8 @@ class TelegramConfig:
     bot_username: str
     news_bot_id: str
     user_chat_ids: List[str]
-    channel_ids: List[str]
+    channel_ids: List[ChatIdentifier]
+    session_path: str = "sessions/news_bot_session"
 
 
 @dataclass
@@ -42,7 +45,40 @@ class AppConfig:
     openai: OpenAIConfig
     rate_limit: RateLimitConfig
     log_level: str = "INFO"
-    log_file: str = "news_bot.log"
+    log_file: str = "logs/news_bot.log"
+
+
+def parse_list(value: str) -> List[str]:
+    """
+    Split a comma-separated string into a list of trimmed, non-empty items.
+
+    Args:
+        value: Comma-separated string.
+
+    Returns:
+        List[str]: Parsed items.
+    """
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def parse_chat_identifier(value: str) -> ChatIdentifier:
+    """
+    Convert a chat identifier to the form Telethon expects.
+
+    Telethon treats numeric strings as phone numbers, so numeric IDs
+    (e.g. "-1001234567890") are converted to int, while usernames and
+    invite links are kept as strings.
+
+    Args:
+        value: Chat identifier from configuration.
+
+    Returns:
+        ChatIdentifier: Integer ID or the original string.
+    """
+    try:
+        return int(value)
+    except ValueError:
+        return value
 
 
 def load_config() -> AppConfig:
@@ -57,12 +93,15 @@ def load_config() -> AppConfig:
         api_id=os.getenv("TELEGRAM_API_ID", ""),
         api_hash=os.getenv("TELEGRAM_API_HASH", ""),
         bot_token=os.getenv("TELEGRAM_BOT_TOKEN", ""),
-        bot_username=os.getenv("TELEGRAM_BOT_USERNAME", ""),
-        news_bot_id=os.getenv("TELEGRAM_NEWS_BOT_ID", ""),
-        user_chat_ids=os.getenv("TELEGRAM_USER_CHAT_IDS", "").split(
-            ",") if os.getenv("TELEGRAM_USER_CHAT_IDS") else [],
-        channel_ids=os.getenv("TELEGRAM_CHANNEL_IDS", "").split(
-            ",") if os.getenv("TELEGRAM_CHANNEL_IDS") else []
+        bot_username=os.getenv("TELEGRAM_BOT_USERNAME", "").strip(),
+        news_bot_id=os.getenv("TELEGRAM_NEWS_BOT_ID", "").strip(),
+        user_chat_ids=parse_list(os.getenv("TELEGRAM_USER_CHAT_IDS", "")),
+        channel_ids=[
+            parse_chat_identifier(item)
+            for item in parse_list(os.getenv("TELEGRAM_CHANNEL_IDS", ""))
+        ],
+        session_path=os.getenv(
+            "TELEGRAM_SESSION_PATH", "sessions/news_bot_session")
     )
 
     # OpenAI configuration
@@ -86,7 +125,7 @@ def load_config() -> AppConfig:
         openai=openai_config,
         rate_limit=rate_limit_config,
         log_level=os.getenv("LOG_LEVEL", "INFO"),
-        log_file=os.getenv("LOG_FILE", "news_bot.log")
+        log_file=os.getenv("LOG_FILE", "logs/news_bot.log")
     )
 
     return config

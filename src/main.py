@@ -1,10 +1,6 @@
 """
 Main entry point for the news bot application.
 """
-from bot.telegram_bot import TelegramBot
-from news_parser.news_bot import NewsParser
-from core.logger import setup_logger
-from core.config import load_config, validate_config
 import asyncio
 import signal
 import sys
@@ -13,6 +9,13 @@ from typing import Optional
 
 # Add src to Python path for imports
 sys.path.insert(0, str(Path(__file__).parent))
+
+from dotenv import find_dotenv, load_dotenv  # noqa: E402
+
+from bot.telegram_bot import TelegramBot  # noqa: E402
+from news_parser.news_bot import NewsParser  # noqa: E402
+from core.logger import setup_logger  # noqa: E402
+from core.config import load_config, validate_config  # noqa: E402
 
 
 class NewsBotApplication:
@@ -24,10 +27,14 @@ class NewsBotApplication:
         self.news_parser: Optional[NewsParser] = None
         self.telegram_bot: Optional[TelegramBot] = None
         self.running = False
+        self._shutdown_event: Optional[asyncio.Event] = None
 
     def setup(self):
         """Initialize the application components."""
         try:
+            # Load .env from the working directory without overriding the existing environment
+            load_dotenv(find_dotenv(usecwd=True))
+
             # Load configuration
             self.config = load_config()
 
@@ -61,8 +68,13 @@ class NewsBotApplication:
             sys.exit(1)
 
     async def start(self) -> None:
-        """Start all application components."""
+        """
+        Start all application components and run until shutdown is requested
+        or the Telegram client disconnects.
+        """
         try:
+            if self._shutdown_event is None:
+                self._shutdown_event = asyncio.Event()
             self.running = True
             if self.logger:
                 self.logger.info("🔄 Starting application components...")
@@ -72,17 +84,37 @@ class NewsBotApplication:
                 raise RuntimeError(
                     "Components not properly initialized. Call setup() first.")
 
-            # Start both components concurrently
-            await asyncio.gather(
-                self.news_parser.start(),
-                self.telegram_bot.start()
+            await self.news_parser.start()
+            await self.telegram_bot.start()
+
+            if self.logger:
+                self.logger.info("✅ All components are running")
+
+            shutdown_task = asyncio.create_task(self._shutdown_event.wait())
+            parser_task = asyncio.create_task(
+                self.news_parser.run_until_disconnected())
+            done, pending = await asyncio.wait(
+                {shutdown_task, parser_task},
+                return_when=asyncio.FIRST_COMPLETED
             )
+            for task in pending:
+                task.cancel()
+
+            if parser_task in done and self.logger:
+                error = parser_task.exception()
+                if error:
+                    self.logger.error(f"Telegram client failed: {error}, shutting down")
+                else:
+                    self.logger.warning("Telegram client disconnected, shutting down")
 
         except Exception as e:
             if self.logger:
                 self.logger.error(f"❌ Error starting application: {e}")
-            if self.running:
-                await self.stop()
+
+    def request_shutdown(self) -> None:
+        """Ask a running application to stop."""
+        if self._shutdown_event is not None:
+            self._shutdown_event.set()
 
     async def stop(self) -> None:
         """Stop all application components."""
@@ -117,12 +149,26 @@ class NewsBotApplication:
                 self.logger.error(f"❌ Error stopping application: {e}")
 
     def setup_signal_handlers(self):
-        """Setup signal handlers for graceful shutdown."""
+        """
+        Setup signal handlers for graceful shutdown.
+
+        Must be called from within the running event loop.
+        """
+        loop = asyncio.get_running_loop()
+        self._shutdown_event = asyncio.Event()
+        signals_received = 0
+
         def signal_handler(signum, frame):
+            nonlocal signals_received
+            signals_received += 1
+            # A second signal forces exit, e.g. while blocked on the Telethon login prompt
+            if signals_received > 1:
+                raise KeyboardInterrupt
             if self.logger:
                 self.logger.info(
-                    f"Received signal {signum}, initiating graceful shutdown...")
-            asyncio.create_task(self.stop())
+                    f"Received signal {signum}, initiating graceful shutdown "
+                    "(send again to force exit)...")
+            loop.call_soon_threadsafe(self.request_shutdown)
 
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
@@ -130,6 +176,11 @@ class NewsBotApplication:
 
 async def main():
     """Main application entry point."""
+    # Consoles with legacy encodings (e.g. cp1251 on Windows) cannot encode emoji
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="backslashreplace")
+
     app = NewsBotApplication()
 
     try:

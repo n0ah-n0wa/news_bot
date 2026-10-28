@@ -10,7 +10,7 @@ services:
     volumes:
       # Mount logs directory for persistence
       - ./logs:/app/logs
-      # Mount session files for Telegram client (Telethon sessions)
+      # Mount session files for Telegram client (TELEGRAM_SESSION_PATH defaults to sessions/)
       - ./sessions:/app/sessions
       # Optional: Mount source code for development (comment out for production)
       # - ./src:/app/src
@@ -50,10 +50,6 @@ services:
 #     - '--storage.tsdb.path=/prometheus'
 #     - '--web.console.libraries=/etc/prometheus/console_libraries'
 #     - '--web.console.templates=/etc/prometheus/consoles'
-
-volumes:
-  logs:
-  sessions:
 
 
 

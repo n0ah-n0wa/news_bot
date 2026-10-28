@@ -1,8 +1,9 @@
 """
 Telegram bot module for handling user interactions and message management.
 """
-from typing import Dict, List, Set
+from typing import Dict, List, Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.constants import ParseMode
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -12,7 +13,7 @@ from telegram.ext import (
     filters
 )
 
-from core.config import AppConfig, TelegramConfig
+from core.config import AppConfig
 from core.logger import LoggerMixin
 
 
@@ -61,17 +62,8 @@ class TelegramBot(LoggerMixin):
 
     def _setup_handlers(self):
         """Set up all bot command and message handlers."""
-        # Message handler for all incoming messages
-        self.application.add_handler(
-            MessageHandler(filters.ALL, self._handle_message)
-        )
-
-        # Callback query handler for button interactions
-        self.application.add_handler(
-            CallbackQueryHandler(self._handle_button_click)
-        )
-
-        # Command handlers
+        # Command handlers must be registered before the catch-all message
+        # handler: within a group, only the first matching handler runs.
         self.application.add_handler(
             CommandHandler("start", self._handle_start_command)
         )
@@ -81,6 +73,38 @@ class TelegramBot(LoggerMixin):
         self.application.add_handler(
             CommandHandler("status", self._handle_status_command)
         )
+
+        # Callback query handler for button interactions
+        self.application.add_handler(
+            CallbackQueryHandler(self._handle_button_click)
+        )
+
+        # Message handler for all remaining incoming messages
+        self.application.add_handler(
+            MessageHandler(filters.ALL, self._handle_message)
+        )
+
+        self.application.add_error_handler(self._handle_error)
+
+    def _is_editor(self, user_id: int) -> bool:
+        """Check if the user is one of the configured editors."""
+        return str(user_id) in self.config.telegram.user_chat_ids
+
+    @staticmethod
+    def _review_keyboard(message_id: int) -> InlineKeyboardMarkup:
+        """Build the review keyboard for a news item."""
+        return InlineKeyboardMarkup([[
+            InlineKeyboardButton("Confirm", callback_data=f'confirm_{message_id}'),
+            InlineKeyboardButton("Delete", callback_data=f'delete_{message_id}')
+        ]])
+
+    @staticmethod
+    def _parse_callback_message_id(data: str) -> Optional[int]:
+        """Extract the message ID from callback data like 'delete_123'."""
+        try:
+            return int(data.split('_', 1)[1])
+        except (IndexError, ValueError):
+            return None
 
     async def _handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """
@@ -97,11 +121,10 @@ class TelegramBot(LoggerMixin):
             return
 
         user_id = update.effective_user.id
-        message_id = update.message.message_id
 
         self.logger.info(f"Received message from user_id: {user_id}")
-        self.logger.info(
-            f"Message content: {update.message.text or '<No text>'}...")
+        self.logger.debug(
+            f"Message content: {update.message.text or update.message.caption or '<No text>'}")
 
         # Check if the message is from the news bot
         if str(user_id) == self.config.telegram.news_bot_id:
@@ -115,6 +138,9 @@ class TelegramBot(LoggerMixin):
         """
         Handle messages from the news bot by forwarding to users with action buttons.
 
+        The message is copied, so text, formatting and any media type
+        (photo, video, document, album item, etc.) are preserved.
+
         Args:
             update: Telegram update object.
             context: Bot context.
@@ -123,42 +149,21 @@ class TelegramBot(LoggerMixin):
             self.logger.warning("Received news message update without message")
             return
 
-        # Create keyboard with action buttons
-        keyboard = [[
-            InlineKeyboardButton("Confirm", callback_data='confirm'),
-            InlineKeyboardButton(
-                "Delete", callback_data=f'delete_{update.message.message_id}')
-        ]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        message_id = update.message.message_id
+        reply_markup = self._review_keyboard(message_id)
 
         # Send the message to all configured users
         for chat_id in self.config.telegram.user_chat_ids:
             try:
-                # Handle different message types
-                if update.message.photo:
-                    await context.bot.send_photo(
-                        chat_id=chat_id,
-                        photo=update.message.photo[-1].file_id,
-                        caption=update.message.caption or "<No text>",
-                        reply_markup=reply_markup
-                    )
-                elif update.message.document:
-                    await context.bot.send_document(
-                        chat_id=chat_id,
-                        document=update.message.document.file_id,
-                        caption=update.message.caption or "<No text>",
-                        reply_markup=reply_markup
-                    )
-                else:
-                    await context.bot.send_message(
-                        chat_id=chat_id,
-                        text=update.message.text or "<No text>",
-                        reply_markup=reply_markup
-                    )
+                await context.bot.copy_message(
+                    chat_id=chat_id,
+                    from_chat_id=update.message.chat_id,
+                    message_id=message_id,
+                    reply_markup=reply_markup
+                )
 
                 # Track the message for this user
-                self.message_tracker.add_message(
-                    int(chat_id), update.message.message_id)
+                self.message_tracker.add_message(int(chat_id), message_id)
                 self.logger.info(f"Message forwarded to user {chat_id}")
 
             except Exception as e:
@@ -201,24 +206,40 @@ class TelegramBot(LoggerMixin):
             return
 
         user_id = query.from_user.id
-        await query.answer()
+        data = query.data or ''
 
-        if query.data == 'confirm':
-            await query.edit_message_text(text="✅ Message confirmed.")
-            self.logger.info(f"User {user_id} confirmed a message")
+        if data == 'confirmed':
+            await query.answer("Already confirmed.")
+            return
 
-        elif query.data and query.data.startswith('delete'):
-            # Extract message ID from callback data
-            message_id = int(query.data.split('_')[1])
+        if not data.startswith(('confirm_', 'delete_')):
+            await query.answer()
+            return
 
-            # Check if user has permission to delete this message
-            if self.message_tracker.has_message(user_id, message_id):
-                await query.delete_message()
-                self.message_tracker.remove_message(user_id, message_id)
-                self.logger.info(
-                    f"User {user_id} deleted message {message_id}")
-            else:
-                await query.edit_message_text(text="❌ You don't have permission to delete this message.")
+        message_id = self._parse_callback_message_id(data)
+
+        # Check if user has permission to act on this message
+        if message_id is None or not self.message_tracker.has_message(user_id, message_id):
+            await query.answer(
+                "❌ You don't have permission to manage this message.", show_alert=True)
+            return
+
+        if data.startswith('confirm_'):
+            # Only the keyboard is edited, so this works for text and media messages alike
+            await query.edit_message_reply_markup(
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("✅ Confirmed", callback_data='confirmed')
+                ]])
+            )
+            self.message_tracker.remove_message(user_id, message_id)
+            await query.answer("✅ Message confirmed.")
+            self.logger.info(f"User {user_id} confirmed message {message_id}")
+
+        else:
+            await query.delete_message()
+            self.message_tracker.remove_message(user_id, message_id)
+            await query.answer("🗑 Message deleted.")
+            self.logger.info(f"User {user_id} deleted message {message_id}")
 
     async def _handle_start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /start command."""
@@ -239,52 +260,53 @@ class TelegramBot(LoggerMixin):
             self.logger.warning("Received help command without message")
             return
 
-        help_text = """
-        📖 **News Bot Help**
-        
-        **Commands:**
-        • /start - Start the bot and see welcome message
-        • /help - Show this help message
-        • /status - Show bot status and configuration
-        
-        **Features:**
-        • Automatically monitors configured news channels
-        • Forwards news with AI-rewritten content
-        • Allows you to confirm or delete messages
-        • Filters out advertisements and personal opinions
-        
-        **Message Actions:**
-        • **Confirm** - Approve the news message
-        • **Delete** - Remove the message from your view
-        
-        The bot will only forward messages that are identified as news content.
-        """
-        await update.message.reply_text(help_text, parse_mode='Markdown')
+        help_text = (
+            "📖 <b>News Bot Help</b>\n\n"
+            "<b>Commands:</b>\n"
+            "• /start - Start the bot and see welcome message\n"
+            "• /help - Show this help message\n"
+            "• /status - Show bot status and configuration (editors only)\n\n"
+            "<b>Features:</b>\n"
+            "• Automatically monitors configured news channels\n"
+            "• Forwards news with AI-rewritten content\n"
+            "• Filters out advertisements\n"
+            "• Allows you to confirm or delete messages\n\n"
+            "<b>Message Actions:</b>\n"
+            "• <b>Confirm</b> - Approve the news message\n"
+            "• <b>Delete</b> - Remove the message from your view"
+        )
+        await update.message.reply_text(help_text, parse_mode=ParseMode.HTML)
 
     async def _handle_status_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /status command."""
-        if not update.message:
+        if not update.message or not update.effective_user:
             self.logger.warning("Received status command without message")
             return
 
-        status_text = f"""
-        📊 **Bot Status**
-        
-        **Configuration:**
-        • Monitored channels: {len(self.config.telegram.channel_ids)}
-        • User chat IDs: {len(self.config.telegram.user_chat_ids)}
-        • News bot ID: {self.config.telegram.news_bot_id}
-        
-        **Message Tracking:**
-        • Total tracked messages: {sum(len(messages) for messages in self.message_tracker._tracker.values())}
-        • Active users: {len(self.message_tracker._tracker)}
-        
-        **Rate Limiting:**
-        • Max requests per minute: {self.config.rate_limit.max_requests_per_minute}
-        • Max tokens per minute: {self.config.rate_limit.max_tokens_per_minute}
-        • Max requests per day: {self.config.rate_limit.max_requests_per_day}
-        """
-        await update.message.reply_text(status_text, parse_mode='Markdown')
+        if not self._is_editor(update.effective_user.id):
+            await update.message.reply_text("❌ This command is available to editors only.")
+            return
+
+        status_text = (
+            "📊 <b>Bot Status</b>\n\n"
+            "<b>Configuration:</b>\n"
+            f"• Monitored channels: {len(self.config.telegram.channel_ids)}\n"
+            f"• User chat IDs: {len(self.config.telegram.user_chat_ids)}\n"
+            f"• News bot ID: {self.config.telegram.news_bot_id}\n\n"
+            "<b>Message Tracking:</b>\n"
+            f"• Total tracked messages: {sum(len(messages) for messages in self.message_tracker._tracker.values())}\n"
+            f"• Active users: {len(self.message_tracker._tracker)}\n\n"
+            "<b>Rate Limiting:</b>\n"
+            f"• Max requests per minute: {self.config.rate_limit.max_requests_per_minute}\n"
+            f"• Max tokens per minute: {self.config.rate_limit.max_tokens_per_minute}\n"
+            f"• Max requests per day: {self.config.rate_limit.max_requests_per_day}"
+        )
+        await update.message.reply_text(status_text, parse_mode=ParseMode.HTML)
+
+    async def _handle_error(self, update: object, context: ContextTypes.DEFAULT_TYPE):
+        """Log exceptions raised by handlers."""
+        self.logger.error(
+            f"Error while handling update: {context.error}", exc_info=context.error)
 
     async def start(self) -> None:
         """Start the Telegram bot."""
@@ -297,8 +319,9 @@ class TelegramBot(LoggerMixin):
     async def stop(self) -> None:
         """Stop the Telegram bot."""
         self.logger.info("Stopping Telegram bot...")
-        if self.application.updater:
+        if self.application.updater and self.application.updater.running:
             await self.application.updater.stop()
-        await self.application.stop()
+        if self.application.running:
+            await self.application.stop()
         await self.application.shutdown()
         return None
